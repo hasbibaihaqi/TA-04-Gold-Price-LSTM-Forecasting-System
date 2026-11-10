@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GoldPredict AI - Peramalan Harga Emas (LSTM)</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            background-color: #f1f5f9;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            color: #1e293b;
+        }
+        .navbar-gold {
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            border-bottom: 3px solid #eab308;
+        }
+        .card-custom {
+            border: none;
+            border-radius: 14px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.04);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            background: #ffffff;
+        }
+        .card-custom:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+        }
+        .card-gold {
+            border-top: 4px solid #eab308;
+        }
+        .card-predict {
+            border-top: 4px solid #2563eb;
+        }
+        .card-simulator {
+            border-top: 4px solid #0d9488;
+        }
+        .metric-value {
+            font-size: 1.85rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+        .metric-sub {
+            font-size: 0.85rem;
+            color: #64748b;
+        }
+        .trend-badge {
+            font-size: 0.85rem;
+            padding: 6px 12px;
+            border-radius: 30px;
+            font-weight: 600;
+        }
+        .nav-pills .nav-link {
+            border-radius: 10px;
+            color: #475569;
+            font-weight: 600;
+            padding: 8px 18px;
+            transition: all 0.2s ease;
+        }
+        .nav-pills .nav-link.active {
+            background-color: #eab308;
+            color: #0f172a;
+            box-shadow: 0 4px 12px rgba(234, 179, 8, 0.35);
+        }
+        .btn-horizon {
+            border-radius: 8px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            padding: 5px 12px;
+        }
+        .btn-horizon.active {
+            background-color: #2563eb;
+            color: white;
+            border-color: #2563eb;
+        }
+        .stat-mini-card {
+            background-color: #f8fafc;
+            border-radius: 10px;
+            padding: 12px 16px;
+            border: 1px solid #e2e8f0;
+        }
+        .btn-preset {
+            font-size: 0.78rem;
+            padding: 4px 10px;
+            border-radius: 6px;
+        }
+        #chartSpinner {
+            min-height: 380px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header Navbar -->
+    <nav class="navbar navbar-dark navbar-gold py-3 mb-4 shadow-sm">
+        <div class="container">
+            <a class="navbar-brand d-flex align-items-center gap-2 fw-bold fs-4" href="#">
+                <i class="bi bi-graph-up-arrow text-warning fs-3"></i>
+                <span>GoldPredict <span class="text-warning">AI</span></span>
+            </a>
+            <div class="d-flex align-items-center gap-2">
+                <!-- Tombol Sinkronisasi Yahoo Finance -->
+                <button class="btn btn-warning btn-sm fw-bold text-dark d-flex align-items-center gap-2 shadow-sm px-3 py-2 rounded-pill" id="btnSyncNav" onclick="syncDataset()" title="Unduh Data Pasar Emas Paling Baru dari Yahoo Finance">
+                    <i class="bi bi-cloud-arrow-down-fill text-dark fs-6" id="syncIcon"></i>
+                    <span id="syncText">Sync Yahoo Finance</span>
+                </button>
+                <span class="badge bg-success-subtle text-success border border-success px-3 py-2 rounded-pill d-none d-sm-inline-block">
+                    <i class="bi bi-check-circle-fill me-1"></i> System Online
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Container -->
+    <div class="container pb-5">
+        
+        <!-- Notifikasi Banner Alert (Saat Sinkronisasi Berhasil) -->
+        <div id="alertBanner" class="alert alert-success alert-dismissible fade show d-none shadow-sm" role="alert">
+            <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-check-circle-fill fs-5"></i>
+                <span id="alertMessage">Dataset berhasil disinkronkan!</span>
+            </div>
+            <button type="button" class="btn-close" onclick="closeAlert()"></button>
+        </div>
+
+        <!-- SECTION 1: Top Forecasting Summary Cards -->
+        <div class="row g-3 mb-4">
+            
+            <!-- Card 1: Harga Terakhir -->
+            <div class="col-lg-4 col-md-6">
+                <div class="card card-custom card-gold h-100 p-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="text-muted fw-semibold">Harga Terakhir Pasar</span>
+                        <i class="bi bi-clock-history text-warning fs-4"></i>
+                    </div>
+                    <div class="metric-value text-dark" id="lastPrice">
+                        <div class="spinner-border spinner-border-sm text-secondary" role="status"></div>
+                    </div>
+                    <div class="metric-sub mt-2">
+                        Tanggal Penutupan: <span id="lastDate" class="fw-semibold text-dark">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card 2: Hasil Prediksi LSTM -->
+            <div class="col-lg-4 col-md-6">
+                <div class="card card-custom card-predict h-100 p-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="text-muted fw-semibold">Prediksi Hari Berikutnya</span>
+                        <i class="bi bi-cpu-fill text-primary fs-4"></i>
+                    </div>
+                    <div class="metric-value text-primary" id="predictedPrice">
+                        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                    </div>
+                    <div class="metric-sub mt-2">
+                        Estimasi Tanggal: <span id="nextDate" class="fw-semibold text-dark">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card 3: Proyeksi Tren -->
+            <div class="col-lg-4 col-md-12">
+                <div class="card card-custom h-100 p-3" id="trendCard">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="text-muted fw-semibold">Proyeksi Perubahan Harga</span>
+                        <i class="bi bi-activity fs-4 text-secondary" id="trendIcon"></i>
+                    </div>
+                    <div class="d-flex align-items-baseline gap-2">
+                        <span class="metric-value" id="priceChange">-</span>
+                        <span class="badge" id="trendBadge">
+                            <div class="spinner-border spinner-border-sm text-light" role="status"></div>
+                        </span>
+                    </div>
+                    <div class="metric-sub mt-2">
+                        Persentase: <span id="percentageChange" class="fw-semibold text-dark">-</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- SECTION 2: Model Performance Metrics (Evaluasi TA-04) -->
+        <div class="row g-3 mb-4">
+            <div class="col-12">
+                <div class="card card-custom p-3 border-start border-4 border-primary">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                        <div>
+                            <h6 class="fw-bold mb-0 text-dark">
+                                <i class="bi bi-award-fill text-warning me-2"></i>
+                                Metrik Evaluasi Kinerja Model (Data Uji / Testing Set)
+                            </h6>
+                            <span class="text-muted small">Evaluasi performa inferensi LSTM pada 20% data uji tanpa shuffle waktu.</span>
+                        </div>
+                        <span class="badge bg-primary-subtle text-primary border border-primary px-3 py-1 rounded-pill">
+                            Langkah 4 & 5 TA-04
+                        </span>
+                    </div>
+
+                    <div class="row g-2 text-center">
+                        <div class="col-6 col-md-3">
+                            <div class="stat-mini-card">
+                                <div class="text-muted small fw-semibold">RMSE (Error Deviasi)</div>
+                                <div class="fs-5 fw-bold text-dark mt-1" id="evalRMSE">
+                                    <div class="spinner-border spinner-border-sm text-secondary" role="status"></div>
+                                </div>
+                                <div class="text-secondary small" style="font-size: 0.75rem;">Root Mean Squared Error</div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <div class="stat-mini-card">
+                                <div class="text-muted small fw-semibold">MAE (Rata-rata Error)</div>
+                                <div class="fs-5 fw-bold text-dark mt-1" id="evalMAE">
+                                    <div class="spinner-border spinner-border-sm text-secondary" role="status"></div>
+                                </div>
+                                <div class="text-secondary small" style="font-size: 0.75rem;">Mean Absolute Error</div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <div class="stat-mini-card">
+                                <div class="text-muted small fw-semibold">Tingkat Akurasi</div>
+                                <div class="fs-5 fw-bold text-success mt-1" id="evalAcc">
+                                    <div class="spinner-border spinner-border-sm text-secondary" role="status"></div>
+                                </div>
+                                <div class="text-secondary small" style="font-size: 0.75rem;">100% - MAPE</div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <div class="stat-mini-card">
+                                <div class="text-muted small fw-semibold">Proporsi Data Latih/Uji</div>
+                                <div class="fs-5 fw-bold text-dark mt-1" id="evalSamples">
+                                    <div class="spinner-border spinner-border-sm text-secondary" role="status"></div>
+                                </div>
+                                <div class="text-secondary small" style="font-size: 0.75rem;">80% Train | 20% Test</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 3: Main Chart Section with Tabs -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card card-custom p-4">
+                    
+                    <!-- Tab Controls & Header -->
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4 pb-2 border-bottom">
+                        <ul class="nav nav-pills" id="chartTab" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active d-flex align-items-center gap-2" id="forecast-tab" data-bs-toggle="pill" type="button" onclick="switchChartMode('forecast')">
+                                    <i class="bi bi-graph-up"></i>
+                                    <span>Peramalan Masa Depan</span>
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link d-flex align-items-center gap-2" id="eval-tab" data-bs-toggle="pill" type="button" onclick="switchChartMode('evaluation')">
+                                    <i class="bi bi-check2-all"></i>
+                                    <span>Evaluasi: Aktual vs Prediksi Data Uji</span>
+                                </button>
+                            </li>
+                        </ul>
+
+                        <!-- Action Controls -->
+                        <div class="d-flex align-items-center gap-2" id="forecastControls">
+                            <span class="text-muted small d-none d-sm-inline">Jangkauan Prediksi:</span>
+                            <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-outline-primary btn-horizon active" id="btnHorizon1" onclick="changeForecastHorizon(1)">1 Hari</button>
+                                <button type="button" class="btn btn-outline-primary btn-horizon" id="btnHorizon3" onclick="changeForecastHorizon(3)">3 Hari</button>
+                                <button type="button" class="btn btn-outline-primary btn-horizon" id="btnHorizon7" onclick="changeForecastHorizon(7)">7 Hari</button>
+                            </div>
+                            <button class="btn btn-outline-secondary btn-sm ms-2" onclick="refreshDashboard()" title="Muat Ulang Tampilan">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Chart Description -->
+                    <div class="mb-3">
+                        <p class="text-muted small mb-0" id="chartSubtitle">
+                            Menampilkan pergerakan 60 hari perdagangan terakhir beserta titik proyeksi masa depan model LSTM.
+                        </p>
+                    </div>
+
+                    <!-- Canvas & Spinner -->
+                    <div class="position-relative" style="min-height: 380px;">
+                        <div id="chartSpinner" class="d-flex justify-content-center align-items-center position-absolute w-100 h-100 bg-white opacity-75 z-3">
+                            <div class="text-center">
+                                <div class="spinner-border text-warning mb-2" role="status" style="width: 2.8rem; height: 2.8rem;"></div>
+                                <div class="text-muted small">Menghitung inferensi LSTM...</div>
+                            </div>
+                        </div>
+                        <canvas id="mainChart" height="110"></canvas>
+                    </div>
+
+                    <!-- Quick Summary Stats Bar -->
+                    <div class="row g-2 mt-3 pt-3 border-top text-center" id="marketStatsRow">
+                        <div class="col-4">
+                            <span class="text-muted small">Harga Terendah (60 Hari): </span>
+                            <span class="fw-bold text-dark" id="statMinPrice">-</span>
+                        </div>
+                        <div class="col-4">
+                            <span class="text-muted small">Rata-rata Harga (60 Hari): </span>
+                            <span class="fw-bold text-dark" id="statAvgPrice">-</span>
+                        </div>
+                        <div class="col-4">
+                            <span class="text-muted small">Harga Tertinggi (60 Hari): </span>
+                            <span class="fw-bold text-dark" id="statMaxPrice">-</span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 4: Simulator Skenario Harga Emas (Interactive What-If Scenario) -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card card-custom card-simulator p-4">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+                        <div>
+                            <h5 class="fw-bold mb-1 text-dark">
+                                <i class="bi bi-sliders2-vertical text-teal text-success me-2"></i>
+                                Simulator Skenario Harga Emas (Interactive What-If Simulator)
+                            </h5>
+                            <p class="text-muted small mb-0">
+                                Uji responsivitas model LSTM terhadap skenario pergerakan harga buatan. Masukkan estimasi harga hari ini untuk melihat prediksi harga keesokan harinya.
+                            </p>
+                        </div>
+                        <span class="badge bg-teal-subtle text-success border border-success px-3 py-1 rounded-pill">
+                            Fitur Eksperimen Interaktif
+                        </span>
+                    </div>
+
+                    <div class="row g-3 align-items-center">
+                        <div class="col-lg-6">
+                            <label for="customPriceInput" class="form-label fw-semibold text-secondary small">
+                                Skenario Harga Penutupan Hari Ini (USD):
+                            </label>
+                            <div class="input-group mb-2">
+                                <span class="input-group-text bg-light fw-bold">$</span>
+                                <input type="number" step="0.01" class="form-control form-control-lg fw-bold" id="customPriceInput" placeholder="Masukkan harga (misal: 4150.00)">
+                                <button class="btn btn-success fw-bold px-4 d-flex align-items-center gap-2" type="button" id="btnRunSim" onclick="runSimulation()">
+                                    <i class="bi bi-lightning-charge-fill"></i>
+                                    <span>Hitung Prediksi</span>
+                                </button>
+                            </div>
+
+                            <!-- Tombol Shortcut Skenario Preset -->
+                            <div class="d-flex flex-wrap align-items-center gap-1 mt-2">
+                                <span class="text-muted small me-1">Skenario Cepat:</span>
+                                <button type="button" class="btn btn-outline-secondary btn-preset" onclick="setPresetPrice(0)">Harga Terkini</button>
+                                <button type="button" class="btn btn-outline-success btn-preset" onclick="setPresetPrice(1)">Naik +1%</button>
+                                <button type="button" class="btn btn-outline-success btn-preset" onclick="setPresetPrice(3)">Naik +3%</button>
+                                <button type="button" class="btn btn-outline-danger btn-preset" onclick="setPresetPrice(-2)">Turun -2%</button>
+                                <button type="button" class="btn btn-outline-danger btn-preset" onclick="setPresetPrice(-4)">Turun -4%</button>
+                            </div>
+                        </div>
+
+                        <!-- Card Hasil Simulasi -->
+                        <div class="col-lg-6">
+                            <div class="stat-mini-card p-3 border-2" id="simResultBox">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="text-muted small fw-semibold">Hasil Proyeksi Skenario LSTM:</span>
+                                    <span class="badge bg-secondary" id="simTrendBadge">Siap Disimulasikan</span>
+                                </div>
+                                <div class="d-flex align-items-baseline gap-3">
+                                    <div class="fs-4 fw-bold text-dark" id="simPredictedPrice">$0.00</div>
+                                    <div class="fw-semibold small" id="simDiff">-</div>
+                                </div>
+                                <div class="text-muted small mt-2" id="simDescription">
+                                    Masukkan nilai harga di sebelah kiri lalu klik tombol "Hitung Prediksi" untuk menguji model.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Footer -->
+    <footer class="text-center py-4 text-muted border-top bg-white fs-7">
+        <div class="container">
+            <small class="fw-semibold">&copy; Tugas Akhir 04 (TA-04) - Praktikum Pembelajaran Mesin: Peramalan LSTM Deret Waktu</small>
+            <div class="text-secondary small mt-1">Implementasi TensorFlow / Keras Sequential LSTM & Flask Web Framework</div>
+        </div>
+    </footer>
+
+    <!-- JavaScript Integrasi API, Multi-Horizon, Simulator, & Sync -->
+    <script>
+        let mainChartInstance = null;
+        let currentMode = 'forecast'; // 'forecast' atau 'evaluation'
+        let currentHorizon = 1;       // 1, 3, atau 7 hari
+        
+        let cachedHistorical = null;
+        let cachedEvaluation = null;
+        let latestRealPrice = 0;
+
+        document.addEventListener("DOMContentLoaded", function () {
+            loadAllData();
+        });
+
+        async function loadAllData() {
+            showSpinner(true);
+
+            // 1. Muat Data Historis Terlebih Dahulu (Prioritas Utama, Cepat & Pasti Berhasil)
+            try {
+                const histRes = await fetch('/api/historical');
+                if (histRes.ok) {
+                    cachedHistorical = await histRes.json();
+                    if (cachedHistorical.status === 'success') {
+                        updateMarketStats(cachedHistorical.stats);
+                        // Render grafik awal dengan data historis
+                        renderForecastChart(cachedHistorical, []);
+                    }
+                }
+            } catch (err) {
+                console.error("Gagal memuat data historis:", err);
+            } finally {
+                showSpinner(false);
+            }
+
+            // 2. Muat Hasil Prediksi LSTM
+            try {
+                const predRes = await fetch(`/api/predict?days=${currentHorizon}`);
+                if (predRes.ok) {
+                    const predData = await predRes.json();
+                    if (predData.status === 'success') {
+                        latestRealPrice = predData.last_price;
+                        const inputEl = document.getElementById('customPriceInput');
+                        if (inputEl) inputEl.value = latestRealPrice.toFixed(2);
+
+                        updateCards(predData);
+                        if (cachedHistorical) {
+                            renderForecastChart(cachedHistorical, predData.forecast);
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("Gagal memuat prediksi LSTM:", err);
+            }
+
+            // 3. Muat Data Evaluasi Model (RMSE, MAE, Aktual vs Prediksi)
+            try {
+                const evalRes = await fetch('/api/evaluation');
+                if (evalRes.ok) {
+                    cachedEvaluation = await evalRes.json();
+                    if (cachedEvaluation.status === 'success') {
+                        updateEvaluationMetrics(cachedEvaluation.data);
+                        if (currentMode === 'evaluation') {
+                            renderEvaluationChart(cachedEvaluation.data);
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("Gagal memuat data evaluasi:", err);
+            }
+        }
+
+        // --- Fitur 1: Sinkronisasi Data Yahoo Finance ---
+        async function syncDataset() {
+            const btn = document.getElementById('btnSyncNav');
+            const icon = document.getElementById('syncIcon');
+            const text = document.getElementById('syncText');
+
+            btn.disabled = true;
+            icon.className = "spinner-border spinner-border-sm text-dark";
+            text.innerText = "Mengunduh Yahoo Finance...";
+
+            try {
+                const res = await fetch('/api/sync-data', { method: 'POST' });
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    showAlert(data.message, 'success');
+                    // Muat ulang seluruh dasbor dengan data terbaru
+                    await loadAllData();
+                } else {
+                    showAlert("Gagal sinkronisasi: " + data.message, 'danger');
+                }
+            } catch (err) {
+                showAlert("Terjadi kesalahan koneksi saat sinkronisasi.", 'danger');
+            } finally {
+                btn.disabled = false;
+                icon.className = "bi bi-cloud-arrow-down-fill text-dark fs-6";
+                text.innerText = "Sync Yahoo Finance";
+            }
+        }
+
+        function showAlert(msg, type='success') {
+            const banner = document.getElementById('alertBanner');
+            const text = document.getElementById('alertMessage');
+            banner.className = `alert alert-${type} alert-dismissible fade show shadow-sm`;
+            text.innerText = msg;
+            banner.classList.remove('d-none');
+            setTimeout(() => { closeAlert(); }, 8000);
+        }
+
+        function closeAlert() {
+            document.getElementById('alertBanner').classList.add('d-none');
+        }
+
+        // --- Fitur 2: Simulator Skenario Harga ---
+        function setPresetPrice(pct) {
+            if (!latestRealPrice) return;
+            const targetPrice = latestRealPrice * (1 + pct / 100);
+            document.getElementById('customPriceInput').value = targetPrice.toFixed(2);
+            runSimulation();
+        }
+
+        async function runSimulation() {
+            const val = parseFloat(document.getElementById('customPriceInput').value);
+            if (isNaN(val) || val <= 0) {
+                alert("Silakan masukkan nilai harga yang valid.");
+                return;
+            }
+
+            const btn = document.getElementById('btnRunSim');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Menghitung...';
+
+            try {
+                const res = await fetch(`/api/simulate?custom_price=${val}`);
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    document.getElementById('simPredictedPrice').innerText = `$${data.simulated_prediction.toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+                    
+                    const badge = document.getElementById('simTrendBadge');
+                    const diffBox = document.getElementById('simDiff');
+                    const desc = document.getElementById('simDescription');
+
+                    const changeTxt = data.price_change >= 0 ? `+$${data.price_change.toFixed(2)}` : `-$${Math.abs(data.price_change).toFixed(2)}`;
+                    const pctTxt = `${data.percentage_change >= 0 ? '+' : ''}${data.percentage_change.toFixed(2)}%`;
+
+                    diffBox.innerText = `${changeTxt} (${pctTxt})`;
+
+                    if (data.trend === 'UP') {
+                        badge.className = "badge bg-success";
+                        badge.innerHTML = '<i class="bi bi-arrow-up-right me-1"></i> Prediksi NAIK';
+                        diffBox.className = "fw-semibold small text-success";
+                        desc.innerText = `Jika hari ini ditutup di $${data.custom_price.toLocaleString('en-US')}, model LSTM memproyeksikan harga keesokan harinya NAIK ke $${data.simulated_prediction.toLocaleString('en-US')}.`;
+                    } else {
+                        badge.className = "badge bg-danger";
+                        badge.innerHTML = '<i class="bi bi-arrow-down-right me-1"></i> Prediksi TURUN';
+                        diffBox.className = "fw-semibold small text-danger";
+                        desc.innerText = `Jika hari ini ditutup di $${data.custom_price.toLocaleString('en-US')}, model LSTM memproyeksikan harga keesokan harinya TURUN ke $${data.simulated_prediction.toLocaleString('en-US')}.`;
+                    }
+                }
+            } catch (err) {
+                console.error("Error simulation:", err);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-lightning-charge-fill"></i> <span>Hitung Prediksi</span>';
+            }
+        }
+
+        // --- Chart Horizon & Modes ---
+        async function changeForecastHorizon(days) {
+            currentHorizon = days;
+            ['btnHorizon1', 'btnHorizon3', 'btnHorizon7'].forEach(id => {
+                document.getElementById(id).classList.remove('active');
+            });
+            document.getElementById(`btnHorizon${days}`).classList.add('active');
+
+            showSpinner(true);
+            try {
+                const res = await fetch(`/api/predict?days=${days}`);
+                const predData = await res.json();
+                if (predData.status === 'success') {
+                    updateCards(predData);
+                    renderForecastChart(cachedHistorical, predData.forecast);
+                }
+            } catch (e) {
+                console.error("Gagal mengubah horizon prediksi:", e);
+            } finally {
+                showSpinner(false);
+            }
+        }
+
+        function switchChartMode(mode) {
+            currentMode = mode;
+            const controls = document.getElementById('forecastControls');
+            const statsRow = document.getElementById('marketStatsRow');
+
+            if (mode === 'forecast') {
+                document.getElementById('forecast-tab').classList.add('active');
+                document.getElementById('eval-tab').classList.remove('active');
+                controls.classList.remove('d-none');
+                statsRow.classList.remove('d-none');
+                document.getElementById('chartSubtitle').innerText = 
+                    `Menampilkan pergerakan 60 hari harga historis beserta titik estimasi ${currentHorizon} hari ke depan dari model LSTM.`;
+            } else {
+                document.getElementById('forecast-tab').classList.remove('active');
+                document.getElementById('eval-tab').classList.add('active');
+                controls.classList.add('d-none');
+                statsRow.classList.add('d-none');
+                document.getElementById('chartSubtitle').innerText = 
+                    "Evaluasi Akurasi: Perbandingan garis data aktual (ground truth) vs hasil prediksi model LSTM pada subset data uji.";
+            }
+
+            renderCurrentChart();
+        }
+
+        function renderCurrentChart() {
+            if (currentMode === 'forecast') {
+                if (cachedHistorical) {
+                    fetch(`/api/predict?days=${currentHorizon}`)
+                        .then(r => r.json())
+                        .then(predData => {
+                            if (predData.status === 'success') {
+                                renderForecastChart(cachedHistorical, predData.forecast);
+                            }
+                        });
+                }
+            } else {
+                if (cachedEvaluation && cachedEvaluation.data) {
+                    renderEvaluationChart(cachedEvaluation.data);
+                }
+            }
+        }
+
+        function updateCards(data) {
+            document.getElementById('lastPrice').innerText = `$${data.last_price.toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+            document.getElementById('lastDate').innerText = data.last_date;
+            
+            document.getElementById('predictedPrice').innerText = `$${data.predicted_price.toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+            document.getElementById('nextDate').innerText = data.next_date;
+
+            const changeText = data.price_change >= 0 ? `+$${data.price_change.toFixed(2)}` : `-$${Math.abs(data.price_change).toFixed(2)}`;
+            document.getElementById('priceChange').innerText = changeText;
+            document.getElementById('percentageChange').innerText = `${data.percentage_change >= 0 ? '+' : ''}${data.percentage_change.toFixed(2)}%`;
+
+            const trendBadge = document.getElementById('trendBadge');
+            const trendCard = document.getElementById('trendCard');
+            const trendIcon = document.getElementById('trendIcon');
+
+            if (data.trend === 'UP') {
+                trendBadge.className = "badge trend-badge bg-success text-white";
+                trendBadge.innerHTML = '<i class="bi bi-arrow-up-right me-1"></i> NAIK (UP)';
+                trendCard.style.borderTop = "4px solid #16a34a";
+                trendIcon.className = "bi bi-graph-up-arrow fs-4 text-success";
+                document.getElementById('priceChange').className = "metric-value text-success";
+            } else {
+                trendBadge.className = "badge trend-badge bg-danger text-white";
+                trendBadge.innerHTML = '<i class="bi bi-arrow-down-right me-1"></i> TURUN (DOWN)';
+                trendCard.style.borderTop = "4px solid #dc2626";
+                trendIcon.className = "bi bi-graph-down-arrow fs-4 text-danger";
+                document.getElementById('priceChange').className = "metric-value text-danger";
+            }
+        }
+
+        function updateEvaluationMetrics(data) {
+            document.getElementById('evalRMSE').innerText = `$${data.rmse.toFixed(2)}`;
+            document.getElementById('evalMAE').innerText = `$${data.mae.toFixed(2)}`;
+            document.getElementById('evalAcc').innerText = `${data.accuracy.toFixed(2)}%`;
+            document.getElementById('evalSamples').innerText = `${data.train_samples} / ${data.test_samples}`;
+        }
+
+        function updateMarketStats(stats) {
+            if (!stats) return;
+            document.getElementById('statMinPrice').innerText = `$${stats.min_price.toLocaleString('en-US')}`;
+            document.getElementById('statAvgPrice').innerText = `$${stats.avg_price.toLocaleString('en-US')}`;
+            document.getElementById('statMaxPrice').innerText = `$${stats.max_price.toLocaleString('en-US')}`;
+        }
+
+        function renderForecastChart(hist, forecastList = []) {
+            const ctx = document.getElementById('mainChart').getContext('2d');
+            if (!hist || !hist.labels) return;
+
+            const histLabels = hist.labels;
+            const histPrices = hist.prices;
+
+            const safeForecast = forecastList || [];
+            const predDates = safeForecast.map(f => `${f.date} (Prediksi)`);
+            const predPrices = safeForecast.map(f => f.predicted_price);
+
+            const allLabels = [...histLabels, ...predDates];
+            const historicalData = [...histPrices, ...new Array(predDates.length).fill(null)];
+
+            const datasets = [
+                {
+                    label: 'Harga Historis (USD)',
+                    data: historicalData,
+                    borderColor: '#eab308',
+                    backgroundColor: 'rgba(234, 179, 8, 0.08)',
+                    borderWidth: 2.2,
+                    fill: true,
+                    tension: 0.2,
+                    pointRadius: 2,
+                    pointHoverRadius: 5
+                }
+            ];
+
+            if (safeForecast.length > 0) {
+                const predictionData = new Array(histPrices.length - 1).fill(null);
+                predictionData.push(histPrices[histPrices.length - 1]);
+                predPrices.forEach(p => predictionData.push(p));
+
+                datasets.push({
+                    label: `Proyeksi LSTM (${safeForecast.length} Hari)`,
+                    data: predictionData,
+                    borderColor: '#2563eb',
+                    backgroundColor: '#2563eb',
+                    borderWidth: 3,
+                    borderDash: [6, 4],
+                    pointRadius: (ctx) => {
+                        const idx = ctx.dataIndex;
+                        return (idx >= histPrices.length - 1) ? 7 : 0;
+                    },
+                    pointBackgroundColor: '#2563eb',
+                    pointBorderColor: '#ffffff',
+                    pointBorderWidth: 2,
+                    pointHoverRadius: 9,
+                    fill: false
+                });
+            }
+
+            if (mainChartInstance) {
+                mainChartInstance.destroy();
+            }
+
+            mainChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: allLabels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                usePointStyle: true,
+                                padding: 20,
+                                font: { weight: '600' }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    if (context.raw !== null) {
+                                        return `${context.dataset.label}: $${context.raw.toFixed(2)}`;
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            ticks: { maxTicksLimit: 12 }
+                        },
+                        y: {
+                            grid: { color: 'rgba(0, 0, 0, 0.04)' },
+                            ticks: {
+                                callback: function(val) { return '$' + val; }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderEvaluationChart(evalData) {
+            const ctx = document.getElementById('mainChart').getContext('2d');
+
+            if (mainChartInstance) {
+                mainChartInstance.destroy();
+            }
+
+            mainChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: evalData.labels,
+                    datasets: [
+                        {
+                            label: 'Harga Aktual Uji (Ground Truth)',
+                            data: evalData.actual,
+                            borderColor: '#0284c7',
+                            backgroundColor: 'rgba(2, 132, 199, 0.06)',
+                            borderWidth: 2.2,
+                            pointRadius: 2.5,
+                            tension: 0.15,
+                            fill: true
+                        },
+                        {
+                            label: 'Hasil Prediksi LSTM (Testing)',
+                            data: evalData.predicted,
+                            borderColor: '#dc2626',
+                            borderWidth: 2.2,
+                            borderDash: [5, 4],
+                            pointRadius: 2.5,
+                            pointBackgroundColor: '#dc2626',
+                            tension: 0.15,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                usePointStyle: true,
+                                padding: 20,
+                                font: { weight: '600' }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.dataset.label}: $${context.raw.toFixed(2)}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            ticks: { maxTicksLimit: 14 }
+                        },
+                        y: {
+                            grid: { color: 'rgba(0, 0, 0, 0.04)' },
+                            ticks: {
+                                callback: function(val) { return '$' + val; }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function refreshDashboard() {
+            loadAllData();
+        }
+
+        function showSpinner(show) {
+            const spinner = document.getElementById('chartSpinner');
+            if (show) {
+                spinner.classList.remove('d-none');
+            } else {
+                spinner.classList.add('d-none');
+            }
+        }
+    </script>
+</body>
+</html>
